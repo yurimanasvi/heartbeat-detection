@@ -158,9 +158,9 @@ if st.session_state.get("scanning") and st.session_state.get("model"):
         pred,conf = scan_room(st.session_state.model,
                               has_victim=has_v, bpm=bpm or 72,
                               strength=strength, noise=noise)
-        if pred==1 and conf>=0.60:    status="victim"
-        elif pred==1 and conf<0.60:   status="uncertain"
-        elif pred==0 and conf<0.55:   status="uncertain"
+        if pred==1 and conf>=0.50:    status="victim"
+        elif pred==1 and conf<0.50:   status="uncertain"
+        elif pred==0 and conf<0.65:   status="uncertain"
         else:                         status="clear"
         st.session_state.results[rid] = {"status":status,"conf":conf,"name":name,"desc":desc}
         if status=="victim":      log=f"🔴 {name} — VICTIM DETECTED ({conf*100:.0f}%)"
