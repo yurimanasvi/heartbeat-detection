@@ -4,7 +4,6 @@ from scipy.signal import butter, filtfilt
 from sklearn.ensemble import RandomForestClassifier
 import random
 import time
-import os
 
 st.set_page_config(page_title="Disaster Heartbeat Detection", page_icon="🫀", layout="wide")
 
@@ -60,29 +59,41 @@ def get_features(signal, sr=100):
 @st.cache_resource
 def train_model():
     X, y = [], []
-    for i in range(600):
-        if i < 300:
-            _, hb = generate_heartbeat(bpm=random.uniform(35,140), strength=random.uniform(0.1,1.0))
-            sig   = add_noise(hb, random.uniform(0.6,1.5))
-            X.append(get_features(bandpass(sig))); y.append(1)
-        else:
-            sig = add_noise(np.zeros(500), random.uniform(0.6,1.5))
-            X.append(get_features(bandpass(sig))); y.append(0)
-    clf = RandomForestClassifier(n_estimators=200, max_depth=10, random_state=42)
+    # Normal heartbeats
+    for _ in range(300):
+        _, hb = generate_heartbeat(bpm=random.uniform(35,140), strength=random.uniform(0.3,1.0))
+        sig   = add_noise(hb, random.uniform(0.6,1.5))
+        X.append(get_features(bandpass(sig))); y.append(1)
+    # WEAK heartbeats — extra training so model learns to detect them
+    for _ in range(200):
+        _, hb = generate_heartbeat(bpm=random.uniform(35,60), strength=random.uniform(0.05,0.25))
+        sig   = add_noise(hb, random.uniform(0.8,1.5))
+        X.append(get_features(bandpass(sig))); y.append(1)
+    # Noise / empty rooms
+    for _ in range(500):
+        sig = add_noise(np.zeros(500), random.uniform(0.6,1.5))
+        X.append(get_features(bandpass(sig))); y.append(0)
+    clf = RandomForestClassifier(n_estimators=300, max_depth=12, random_state=42)
     clf.fit(np.array(X), np.array(y))
-    return clf, 600, 0
+    return clf, 1000, 0
 
 def scan_room(model, has_victim=True, bpm=72, strength=1.0, noise=1.0):
-    if has_victim:
-        _, hb = generate_heartbeat(bpm=bpm, strength=strength)
-    else:
-        hb = np.zeros(500)
-    sig  = add_noise(hb, noise)
-    filt = bandpass(sig)
-    feat = np.array([get_features(filt)])
-    pred = model.predict(feat)[0]
-    prob = model.predict_proba(feat)[0]
-    return int(pred), float(max(prob))
+    # Scan 3 times and take majority vote for better accuracy
+    preds, confs = [], []
+    for _ in range(3):
+        if has_victim:
+            _, hb = generate_heartbeat(bpm=bpm, strength=strength)
+        else:
+            hb = np.zeros(500)
+        sig  = add_noise(hb, noise)
+        filt = bandpass(sig)
+        feat = np.array([get_features(filt)])
+        preds.append(model.predict(feat)[0])
+        confs.append(max(model.predict_proba(feat)[0]))
+    # Majority vote
+    final_pred = 1 if sum(preds) >= 2 else 0
+    final_conf = float(np.mean(confs))
+    return final_pred, final_conf
 
 ROOMS = [
     ("R101","Room 101",    1,True, 78,  0.90,0.8,"Normal adult"),
@@ -97,11 +108,10 @@ ROOMS = [
     ("R205","Stairwell B", 2,True, 38,  0.15,1.4,"Injured (very weak)"),
 ]
 
-if "results"   not in st.session_state: st.session_state.results   = {}
-if "scanning"  not in st.session_state: st.session_state.scanning  = False
-if "scan_log"  not in st.session_state: st.session_state.scan_log  = []
-if "model"     not in st.session_state: st.session_state.model     = None
-if "real_count" not in st.session_state: st.session_state.real_count = 0
+if "results"    not in st.session_state: st.session_state.results    = {}
+if "scanning"   not in st.session_state: st.session_state.scanning   = False
+if "scan_log"   not in st.session_state: st.session_state.scan_log   = []
+if "model"      not in st.session_state: st.session_state.model      = None
 if "synth_count" not in st.session_state: st.session_state.synth_count = 0
 
 st.markdown("# 🫀 Disaster Heartbeat Detection System")
@@ -116,10 +126,10 @@ with st.sidebar:
             model, synth_count, real_count = train_model()
             st.session_state.model       = model
             st.session_state.synth_count = synth_count
-            st.session_state.real_count  = real_count
         st.success("✅ Model ready!")
     if st.session_state.model is not None:
-        st.markdown(f"🧪 Synthetic: `{st.session_state.synth_count}` samples")
+        st.markdown(f"🧪 Training samples: `{st.session_state.synth_count}`")
+        st.markdown("✅ Weak heartbeat detection ON")
     st.markdown("---")
     scan_floor = st.selectbox("Floor to scan", ["All floors","Floor 1","Floor 2"])
     scan_speed = st.slider("Scan speed (sec per room)", 0.3, 2.0, 0.6, step=0.1)
@@ -148,9 +158,9 @@ if st.session_state.get("scanning") and st.session_state.get("model"):
         pred,conf = scan_room(st.session_state.model,
                               has_victim=has_v, bpm=bpm or 72,
                               strength=strength, noise=noise)
-        if pred==1 and conf>=0.70:    status="victim"
-        elif pred==1 and conf<0.70:   status="uncertain"
-        elif pred==0 and conf<0.65:   status="uncertain"
+        if pred==1 and conf>=0.60:    status="victim"
+        elif pred==1 and conf<0.60:   status="uncertain"
+        elif pred==0 and conf<0.55:   status="uncertain"
         else:                         status="clear"
         st.session_state.results[rid] = {"status":status,"conf":conf,"name":name,"desc":desc}
         if status=="victim":      log=f"🔴 {name} — VICTIM DETECTED ({conf*100:.0f}%)"
