@@ -80,7 +80,7 @@ def train_model():
 def scan_room(model, has_victim=True, bpm=72, strength=1.0, noise=1.0):
     # Scan 3 times and take majority vote for better accuracy
     preds, confs = [], []
-    for _ in range(3):
+    for _ in range(5):
         if has_victim:
             _, hb = generate_heartbeat(bpm=bpm, strength=strength)
         else:
@@ -91,7 +91,7 @@ def scan_room(model, has_victim=True, bpm=72, strength=1.0, noise=1.0):
         preds.append(model.predict(feat)[0])
         confs.append(max(model.predict_proba(feat)[0]))
     # Majority vote
-    final_pred = 1 if sum(preds) >= 2 else 0
+    final_pred = 1 if sum(preds) >= 3 else 0
     final_conf = float(np.mean(confs))
     return final_pred, final_conf
 
