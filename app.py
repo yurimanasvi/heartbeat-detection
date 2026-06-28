@@ -62,25 +62,25 @@ def train_model():
     # Normal heartbeats
     for _ in range(300):
         _, hb = generate_heartbeat(bpm=random.uniform(35,140), strength=random.uniform(0.3,1.0))
-        sig   = add_noise(hb, random.uniform(0.6,1.5))
+        sig   = add_noise(hb, random.uniform(0.4,1.2))
         X.append(get_features(bandpass(sig))); y.append(1)
-    # WEAK heartbeats — extra training so model learns to detect them
-    for _ in range(200):
-        _, hb = generate_heartbeat(bpm=random.uniform(35,60), strength=random.uniform(0.05,0.25))
-        sig   = add_noise(hb, random.uniform(0.8,1.5))
-        X.append(get_features(bandpass(sig))); y.append(1)
-    # Noise / empty rooms
+    # Weak heartbeats — lots of them so model learns
     for _ in range(500):
-        sig = add_noise(np.zeros(500), random.uniform(0.6,1.5))
+        _, hb = generate_heartbeat(bpm=random.uniform(30,60), strength=random.uniform(0.05,0.20))
+        sig   = add_noise(hb, random.uniform(0.5,1.2))
+        X.append(get_features(bandpass(sig))); y.append(1)
+    # Empty rooms / noise only
+    for _ in range(800):
+        sig = add_noise(np.zeros(500), random.uniform(0.4,1.2))
         X.append(get_features(bandpass(sig))); y.append(0)
-    clf = RandomForestClassifier(n_estimators=300, max_depth=12, random_state=42)
+    clf = RandomForestClassifier(n_estimators=300, max_depth=15, random_state=42)
     clf.fit(np.array(X), np.array(y))
-    return clf, 1000, 0
+    return clf, 1600, 0
 
 def scan_room(model, has_victim=True, bpm=72, strength=1.0, noise=1.0):
-    # Scan 3 times and take majority vote for better accuracy
+    # Scan 7 times and take majority vote
     preds, confs = [], []
-    for _ in range(5):
+    for _ in range(7):
         if has_victim:
             _, hb = generate_heartbeat(bpm=bpm, strength=strength)
         else:
@@ -90,8 +90,7 @@ def scan_room(model, has_victim=True, bpm=72, strength=1.0, noise=1.0):
         feat = np.array([get_features(filt)])
         preds.append(model.predict(feat)[0])
         confs.append(max(model.predict_proba(feat)[0]))
-    # Majority vote
-    final_pred = 1 if sum(preds) >= 3 else 0
+    final_pred = 1 if sum(preds) >= 4 else 0
     final_conf = float(np.mean(confs))
     return final_pred, final_conf
 
@@ -108,10 +107,10 @@ ROOMS = [
     ("R205","Stairwell B", 2,True, 38,  0.15,1.4,"Injured (very weak)"),
 ]
 
-if "results"    not in st.session_state: st.session_state.results    = {}
-if "scanning"   not in st.session_state: st.session_state.scanning   = False
-if "scan_log"   not in st.session_state: st.session_state.scan_log   = []
-if "model"      not in st.session_state: st.session_state.model      = None
+if "results"     not in st.session_state: st.session_state.results     = {}
+if "scanning"    not in st.session_state: st.session_state.scanning    = False
+if "scan_log"    not in st.session_state: st.session_state.scan_log    = []
+if "model"       not in st.session_state: st.session_state.model       = None
 if "synth_count" not in st.session_state: st.session_state.synth_count = 0
 
 st.markdown("# 🫀 Disaster Heartbeat Detection System")
@@ -123,7 +122,7 @@ with st.sidebar:
     st.markdown("---")
     if st.button("🔄 Load & train AI model", use_container_width=True):
         with st.spinner("Training…"):
-            model, synth_count, real_count = train_model()
+            model, synth_count, _ = train_model()
             st.session_state.model       = model
             st.session_state.synth_count = synth_count
         st.success("✅ Model ready!")
@@ -160,7 +159,7 @@ if st.session_state.get("scanning") and st.session_state.get("model"):
                               strength=strength, noise=noise)
         if pred==1 and conf>=0.50:    status="victim"
         elif pred==1 and conf<0.50:   status="uncertain"
-        elif pred==0 and conf<0.65:   status="uncertain"
+        elif pred==0 and conf<0.60:   status="uncertain"
         else:                         status="clear"
         st.session_state.results[rid] = {"status":status,"conf":conf,"name":name,"desc":desc}
         if status=="victim":      log=f"🔴 {name} — VICTIM DETECTED ({conf*100:.0f}%)"
